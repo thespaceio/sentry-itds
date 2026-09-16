@@ -1,0 +1,9 @@
+# Core detection pipeline
+numpy>=1.26
+scikit-learn>=1.4
+PyYAML>=6.0
+
+# API and dashboard
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.6

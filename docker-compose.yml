@@ -1,0 +1,15 @@
+services:
+  sentry:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./rules:/app/rules:ro
+    environment:
+      # Override in any real deployment. A predictable salt means predictable
+      # pseudonyms, which defeats the point of having them.
+      ITDS_PSEUDONYM_SALT: ${ITDS_PSEUDONYM_SALT:-change-me-before-you-deploy-this}
+      ITDS_ALERT_BUDGET: 20
+      ITDS_EVENT_RETENTION_DAYS: 90
+    restart: unless-stopped
