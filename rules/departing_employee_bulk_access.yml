@@ -1,0 +1,18 @@
+id: departing_employee_bulk_access
+title: Departing employee accessing files in bulk
+severity: critical
+confidence: 0.95
+description: >
+  Notice has been given and the user is reading files far beyond any normal
+  working volume. This is the single highest-yield insider detection there is:
+  the intent window is known, so volume that would be ambiguous otherwise
+  becomes meaningful.
+aggregate:
+  window: day
+  condition:
+    - file_read_count > 250
+  require_context:
+    - departing
+tags: [exfiltration, departure, high-yield]
+references:
+  - https://attack.mitre.org/techniques/T1530/

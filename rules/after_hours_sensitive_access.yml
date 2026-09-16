@@ -1,0 +1,13 @@
+id: after_hours_sensitive_access
+title: Sensitive files accessed at night in volume
+severity: high
+confidence: 0.8
+description: >
+  Restricted material read during hours when almost nobody works. Volume and
+  timing together — either alone is routine for someone.
+aggregate:
+  window: day
+  condition:
+    - night_event_count > 100
+    - restricted_file_count > 20
+tags: [off-hours, sensitive-data]

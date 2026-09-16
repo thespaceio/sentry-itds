@@ -1,0 +1,14 @@
+id: departing_employee_personal_cloud
+title: Departing employee uploading to personal cloud storage
+severity: critical
+confidence: 0.97
+description: >
+  Data leaving to consumer file-sharing during a notice period. Almost never
+  has a legitimate explanation, and the destination is evidence in itself.
+aggregate:
+  window: day
+  condition:
+    - personal_cloud_bytes > 1000000000
+  require_context:
+    - departing
+tags: [exfiltration, departure, cloud]

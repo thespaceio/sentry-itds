@@ -1,0 +1,12 @@
+id: canary_file_access
+title: Canary file accessed
+severity: critical
+confidence: 1.0
+description: >
+  A decoy file that no legitimate workflow touches was opened. There is no
+  false-positive path here — the file exists only to be a tripwire. Place a
+  handful across sensitive shares with names that attract a browsing intruder.
+match:
+  action: canary_access
+threshold: 1
+tags: [deception, tripwire]

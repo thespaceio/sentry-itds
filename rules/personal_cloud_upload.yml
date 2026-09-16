@@ -1,0 +1,18 @@
+id: personal_cloud_upload
+title: Upload to consumer file-sharing service
+severity: medium
+confidence: 0.7
+description: >
+  Data moved to Dropbox, Google Drive, MEGA or similar from a corporate host.
+  Medium on its own because plenty of people do this innocently; it earns its
+  weight when it stacks with other findings on the same user.
+match:
+  action: upload
+  destination:
+    - "*dropbox.com"
+    - "*drive.google.com"
+    - "*mega.nz"
+    - "*wetransfer.com"
+    - "*pcloud.com"
+threshold: 1
+tags: [exfiltration, cloud, shadow-it]

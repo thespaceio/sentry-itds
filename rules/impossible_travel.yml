@@ -1,0 +1,17 @@
+id: impossible_travel
+title: Authentication from multiple countries in one day
+severity: high
+confidence: 0.75
+description: >
+  Successful logons from geographically incompatible locations. Strongly
+  suggests a compromised credential rather than a malicious employee. Check
+  VPN and corporate proxy egress before escalating — those are the two
+  legitimate explanations.
+aggregate:
+  window: day
+  condition:
+    - distinct_countries >= 2
+    - logon_count >= 2
+tags: [compromised-account, authentication]
+references:
+  - https://attack.mitre.org/techniques/T1078/

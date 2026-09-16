@@ -1,0 +1,15 @@
+id: privileged_command_spike
+title: Unusual volume of privileged commands
+severity: high
+confidence: 0.75
+description: >
+  Administrative actions well beyond a normal day. Consistent with either an
+  attacker enumerating a network after credential theft or an administrator
+  preparing to take something with them.
+aggregate:
+  window: day
+  condition:
+    - privileged_action_count > 15
+tags: [privilege-abuse, discovery]
+references:
+  - https://attack.mitre.org/tactics/TA0007/

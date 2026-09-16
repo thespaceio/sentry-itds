@@ -1,0 +1,14 @@
+id: weekend_restricted_access
+title: Restricted data accessed at the weekend
+severity: medium
+confidence: 0.65
+description: >
+  Weekend access to the most sensitive classification. Low-weight by design:
+  plenty of people genuinely work Saturdays. It matters when it is new for the
+  person concerned, which the statistical engine will say.
+aggregate:
+  window: day
+  condition:
+    - weekend == 1
+    - restricted_file_count > 10
+tags: [off-hours, sensitive-data]

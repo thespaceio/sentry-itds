@@ -1,0 +1,16 @@
+id: usb_mass_copy
+title: Large volume written to removable media
+severity: high
+confidence: 0.85
+description: >
+  Bulk copy to USB. Legitimate in some roles, which is why this is high rather
+  than critical — pair it with departure context or off-hours timing before
+  escalating.
+aggregate:
+  window: day
+  condition:
+    - removable_media_count >= 1
+    - total_bytes > 1000000000
+tags: [exfiltration, removable-media]
+references:
+  - https://attack.mitre.org/techniques/T1052/001/

@@ -1,0 +1,14 @@
+id: external_email_bulk_attachment
+title: High-volume external email with attachments
+severity: medium
+confidence: 0.6
+description: >
+  Mail leaving the organization with substantial attached data. Common in
+  sales and partner-facing roles, so this is deliberately low-weight — it
+  exists to add context to a case, not to open one.
+aggregate:
+  window: day
+  condition:
+    - external_email_count > 30
+    - external_email_bytes > 200000000
+tags: [exfiltration, email]
