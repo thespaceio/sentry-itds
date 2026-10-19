@@ -11,5 +11,6 @@ aggregate:
   condition:
     - privileged_action_count > 15
 tags: [privilege-abuse, discovery]
+attack: [T1059, T1087]
 references:
   - https://attack.mitre.org/tactics/TA0007/

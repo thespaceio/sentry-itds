@@ -1,0 +1,15 @@
+id: privileged_group_change
+title: Account added to a privileged group
+severity: high
+confidence: 0.7
+description: >
+  A member was added to a security-enabled group (Windows events 4728, 4732,
+  4756). Routine for identity administrators, which is why this is high rather
+  than critical; it matters most when the actor is not one of them or the
+  change happens outside a change window.
+match:
+  category: process
+  action: group_membership_change
+threshold: 1
+tags: [privilege-abuse, persistence]
+attack: [T1098]

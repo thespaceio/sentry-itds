@@ -6,6 +6,11 @@
     python -m itds cases --limit 10
     python -m itds explain <actor_or_pseudonym>
     python -m itds purge
+    python -m itds import --format windows security.json
+    python -m itds attack
+    python -m itds user add alice --role analyst
+    python -m itds audit verify
+    python -m itds serve
 
 Deliberately argparse rather than a CLI framework. One less dependency, and
 the whole interface fits on a screen.
@@ -14,8 +19,11 @@ the whole interface fits on a screen.
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
+import os
 import sys
+import uuid
 from datetime import datetime, timedelta
 
 from .config import Config
@@ -59,6 +67,24 @@ def _load_generated(config: Config):
     return events, identities, labels
 
 
+def _write_identities(identities, path) -> None:
+    out = {
+        a: {
+            "display_name": i.display_name,
+            "department": i.department,
+            "role": i.role,
+            "is_privileged": i.is_privileged,
+            "joined_on": i.joined_on.isoformat() if i.joined_on else None,
+            "departure_notice_on": i.departure_notice_on.isoformat()
+            if i.departure_notice_on
+            else None,
+            "last_day_on": i.last_day_on.isoformat() if i.last_day_on else None,
+        }
+        for a, i in identities.items()
+    }
+    path.write_text(json.dumps(out, indent=2))
+
+
 def _dt(value):
     return datetime.fromisoformat(value) if value else None
 
@@ -75,21 +101,7 @@ def cmd_generate(args, config: Config) -> None:
         for e in events:
             fh.write(json.dumps(e.to_dict()) + "\n")
 
-    ident_out = {
-        a: {
-            "display_name": i.display_name,
-            "department": i.department,
-            "role": i.role,
-            "is_privileged": i.is_privileged,
-            "joined_on": i.joined_on.isoformat() if i.joined_on else None,
-            "departure_notice_on": i.departure_notice_on.isoformat()
-            if i.departure_notice_on
-            else None,
-            "last_day_on": i.last_day_on.isoformat() if i.last_day_on else None,
-        }
-        for a, i in identities.items()
-    }
-    (config.data_dir / "identities.json").write_text(json.dumps(ident_out, indent=2))
+    _write_identities(identities, config.data_dir / "identities.json")
     (config.data_dir / "labels.json").write_text(json.dumps(labels, indent=2))
 
     print(f"{len(events):,} events for {len(identities)} users over {args.days} days")
@@ -110,6 +122,26 @@ def cmd_run(args, config: Config) -> None:
     score_from = last - timedelta(days=args.window)
     result = pipeline.run(events, identities, score_from=score_from)
 
+    stats = {
+        "events_trained": result["events_trained"],
+        "events_scored": result["events_scored"],
+        "scored_from": result["scored_from"],
+        "detections": result["total_detections"],
+        "entities_with_detections": result["entities_with_detections"],
+        "cases": len(result["cases"]),
+        "new_cases": len(result["new_case_ids"]),
+        "suppressed_detections": result["suppressed_detections"],
+        "ml_fitted": result["ml_fitted"],
+    }
+    store.record_run(str(uuid.uuid4()), stats)
+    from .audit import AuditLog
+    AuditLog(store).record("system", "pipeline.run", None, stats)
+
+    from .alerts import Notifier
+    notifier = Notifier.from_env()
+    new_cases = [c for c in result["cases"] if c.case_id in set(result["new_case_ids"])]
+    alert_status = notifier.notify(new_cases) if not args.no_alerts else {}
+
     print(BAR)
     print(
         f"Trained on {result['events_trained']:,} events, "
@@ -125,6 +157,11 @@ def cmd_run(args, config: Config) -> None:
             f"{len(result['insufficient_history'])} entities skipped "
             "(insufficient history)"
         )
+    if result["suppressed_detections"]:
+        print(f"{result['suppressed_detections']} detections suppressed by analyst feedback")
+    if result["new_case_ids"]:
+        print(f"{len(result['new_case_ids'])} new case(s)", end="")
+        print(f"; alerts: {alert_status}" if alert_status else "")
     print(BAR)
     _print_cases(result["cases"], labels, limit=args.limit)
 
@@ -157,7 +194,10 @@ def cmd_cases(args, config: Config) -> None:
 
 def cmd_explain(args, config: Config) -> None:
     store = Store(config.db_path)
-    detections = store.detections_for(args.actor)
+    actor = args.actor
+    if actor.startswith("EMP-"):
+        actor = store.actor_for_pseudonym(actor) or actor
+    detections = store.detections_for(actor)
     if not detections:
         print(f"No detections recorded for {args.actor}.")
         return
@@ -190,8 +230,12 @@ def cmd_reveal(args, config: Config) -> None:
         raise SystemExit(2) from exc
 
     store = Store(config.db_path)
+    from .audit import AuditLog
     for record in pipeline.pseudonymizer.audit_log:
         store.record_reveal(record)
+        AuditLog(store).record(args.requested_by, "reveal.cli", args.case_id,
+                               {"pseudonym": args.pseudonym, "approved_by": args.approved_by,
+                                "reason": args.reason})
     ident = identities.get(actor)
     print(f"{args.pseudonym} -> {actor}")
     if ident:
@@ -220,7 +264,134 @@ def _print_cases(cases, labels, limit: int) -> None:
         print(f"{i:>3}. {case.pseudonym or case.actor_id:<12} risk {case.risk_score:>5.1f}{ctx}{tag}")
         for line in case.summary.splitlines():
             print(f"       {line}")
+        if case.attack:
+            print(f"       ATT&CK: {', '.join(case.attack[:6])}")
         print()
+
+
+def cmd_import(args, config: Config) -> None:
+    from .ingest.sources import import_files
+
+    events, report = import_files(args.format, args.paths, identities=args.identities,
+                                 cert_users=args.users,
+                                 internal_domains=set(args.internal_domain or []))
+    if not events:
+        print("No events could be mapped. Check --format.", file=sys.stderr)
+        raise SystemExit(1)
+    config.data_dir.mkdir(parents=True, exist_ok=True)
+    out = config.data_dir / "events.jsonl"
+    mode = "a" if args.append else "w"
+    with open(out, mode, encoding="utf-8") as fh:
+        for e in events:
+            fh.write(json.dumps(e.to_dict()) + "\n")
+    if args.identities:
+        from .ingest.sources import load_identities_csv
+
+        identities = load_identities_csv(args.identities)
+        _write_identities(identities, config.data_dir / "identities.json")
+        print(f"{len(identities)} identities from {args.identities}")
+    if not args.append:
+        (config.data_dir / "labels.json").unlink(missing_ok=True)
+    print(f"{len(events):,} events written to {out}")
+    for k, v in report.items():
+        print(f"  {k}: {v}")
+
+
+def cmd_attack(args, config: Config) -> None:
+    from .detect.attack import CATALOGUE, FEATURE_TECHNIQUES
+    from .detect.rules import load_rules
+
+    rules = load_rules(config.rules_dir)
+    by_tactic: dict[str, list] = {}
+    for t in CATALOGUE.values():
+        by_tactic.setdefault(t.tactic, []).append(t)
+    print("ATT&CK coverage (rules / statistical and ML features)")
+    print(BAR)
+    for tactic, techs in by_tactic.items():
+        print(tactic)
+        for t in techs:
+            rule_ids = [r.id for r in rules if t.id in r.attack]
+            feats = [f for f, ts in FEATURE_TECHNIQUES.items() if t.id in ts]
+            mark = "x" if rule_ids or feats else " "
+            print(f"  [{mark}] {t.id:<10} {t.name}")
+            if rule_ids:
+                print(f"        rules:    {', '.join(rule_ids)}")
+            if feats:
+                print(f"        features: {', '.join(feats)}")
+    print(BAR)
+
+
+def cmd_user(args, config: Config) -> None:
+    from .audit import AuditLog
+    from .auth import Authenticator
+
+    store = Store(config.db_path)
+    auth = Authenticator(store)
+    if args.action in ("add", "disable") and not args.username:
+        print("A username is required.", file=sys.stderr)
+        raise SystemExit(2)
+    if args.action == "add":
+        password = os.environ.get("ITDS_NEW_USER_PASSWORD") or getpass.getpass(
+            f"Password for {args.username} (12+ characters): ")
+        try:
+            user = auth.create_user(args.username, password, args.role)
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            raise SystemExit(2) from exc
+        AuditLog(store).record("cli", "user.create", user.username, {"role": user.role})
+        print(f"Created {user.username} ({user.role})")
+    elif args.action == "list":
+        for u in auth.list_users():
+            state = "disabled" if u["disabled"] else "active"
+            print(f"{u['username']:<20} {u['role']:<8} {state}")
+    elif args.action == "disable":
+        if not auth.set_disabled(args.username, True):
+            print(f"No such user: {args.username}", file=sys.stderr)
+            raise SystemExit(2)
+        AuditLog(store).record("cli", "user.disable", args.username)
+        print(f"Disabled {args.username}")
+
+
+def cmd_audit(args, config: Config) -> None:
+    from .audit import AuditLog
+
+    log = AuditLog(Store(config.db_path))
+    if args.action == "verify":
+        result = log.verify()
+        print(result)
+        raise SystemExit(0 if result.ok else 3)
+    if args.action == "head":
+        print(log.head())
+        return
+    for e in reversed(log.entries(limit=args.limit)):
+        print(f"{e['seq']:>5}  {e['at'][:19]}  {e['actor']:<12} {e['action']:<18} "
+              f"{e['target'] or ''}")
+
+
+def cmd_rules(args, config: Config) -> None:
+    from .feedback import FeedbackStore
+
+    stats = FeedbackStore(Store(config.db_path)).detection_stats()
+    if not stats:
+        print("No analyst feedback recorded yet.")
+        return
+    print(f"{'detection':<38} {'verdicts':>8} {'precision':>9}  status")
+    for name, s in sorted(stats.items(), key=lambda kv: -kv[1]["verdicts"]):
+        p = "-" if s["precision"] is None else f"{s['precision']:.2f}"
+        flag = "NEEDS TUNING" if s["needs_tuning"] else ""
+        print(f"{name:<38} {s['verdicts']:>8} {p:>9}  {flag}")
+
+
+def cmd_serve(args, config: Config) -> None:
+    import uvicorn
+
+    from .auth import Authenticator
+
+    if not Authenticator(Store(config.db_path)).has_users():
+        print("No user accounts exist yet. Create one first, e.g.\n"
+              "  python -m itds user add lead1 --role lead", file=sys.stderr)
+        raise SystemExit(2)
+    uvicorn.run("itds.api.main:app", host=args.host, port=args.port, reload=False)
 
 
 # -- entry point --------------------------------------------------------
@@ -240,6 +411,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--window", type=int, default=14, help="Days to score")
     r.add_argument("--limit", type=int, default=10)
     r.add_argument("--persist-events", action="store_true")
+    r.add_argument("--no-alerts", action="store_true", help="Do not send alerts")
     r.set_defaults(func=cmd_run)
 
     c = sub.add_parser("cases", help="Show the open case queue")
@@ -261,6 +433,39 @@ def build_parser() -> argparse.ArgumentParser:
 
     pu = sub.add_parser("purge", help="Apply retention policy")
     pu.set_defaults(func=cmd_purge)
+
+    im = sub.add_parser("import", help="Import logs into the dataset")
+    im.add_argument("--format", required=True,
+                    choices=["windows", "auditd", "m365", "cert", "jsonl", "csv"])
+    im.add_argument("paths", nargs="+")
+    im.add_argument("--identities", help="HR CSV: actor_id, display_name, department, ...")
+    im.add_argument("--users", nargs="*", help="CERT only: limit to these user ids")
+    im.add_argument("--append", action="store_true")
+    im.add_argument("--internal-domain", action="append",
+                    help="m365: your email domain(s), for external forwarding rules")
+    im.set_defaults(func=cmd_import)
+
+    at = sub.add_parser("attack", help="Show MITRE ATT&CK coverage")
+    at.set_defaults(func=cmd_attack)
+
+    ru = sub.add_parser("rules", help="Rule health from analyst feedback")
+    ru.set_defaults(func=cmd_rules)
+
+    us = sub.add_parser("user", help="Manage dashboard accounts")
+    us.add_argument("action", choices=["add", "list", "disable"])
+    us.add_argument("username", nargs="?")
+    us.add_argument("--role", choices=["analyst", "lead", "admin"], default="analyst")
+    us.set_defaults(func=cmd_user)
+
+    au = sub.add_parser("audit", help="Inspect or verify the audit log")
+    au.add_argument("action", choices=["verify", "head", "log"])
+    au.add_argument("--limit", type=int, default=50)
+    au.set_defaults(func=cmd_audit)
+
+    sv = sub.add_parser("serve", help="Start the API and dashboard")
+    sv.add_argument("--host", default="127.0.0.1")
+    sv.add_argument("--port", type=int, default=8000)
+    sv.set_defaults(func=cmd_serve)
 
     return p
 

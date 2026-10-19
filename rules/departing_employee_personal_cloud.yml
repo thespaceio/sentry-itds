@@ -12,3 +12,4 @@ aggregate:
   require_context:
     - departing
 tags: [exfiltration, departure, cloud]
+attack: [T1567.002]

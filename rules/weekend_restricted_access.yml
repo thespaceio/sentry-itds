@@ -12,3 +12,4 @@ aggregate:
     - weekend == 1
     - restricted_file_count > 10
 tags: [off-hours, sensitive-data]
+attack: [T1213]

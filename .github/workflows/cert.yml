@@ -1,0 +1,92 @@
+name: Accuracy (CERT r4.2)
+
+# Downloads the CERT Insider Threat Test Dataset r4.2 (CC BY 4.0, Carnegie
+# Mellon University, doi:10.1184/R1/12841247) at run time, keeps only the files
+# Sentry reads, and replays all 17 months in two-week windows. Nothing from
+# the dataset is committed; results are uploaded as an artifact.
+
+on:
+  workflow_dispatch:
+    inputs:
+      window:
+        description: "Days per scoring window"
+        default: "14"
+      train:
+        description: "Days of history per window"
+        default: "60"
+
+permissions:
+  contents: read
+
+jobs:
+  cert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          pip install -r requirements.txt
+          sudo apt-get update -q && sudo apt-get install -y -q lbzip2
+
+      - name: Download answer key and checksums
+        run: |
+          mkdir -p cert && cd cert
+          curl -fsSL --retry 5 -o answers.tar.bz2 https://ndownloader.figshare.com/files/24857828
+          curl -fsSL --retry 5 -o CHECKSUMS-sha256.txt https://ndownloader.figshare.com/files/24857831
+          tar xjf answers.tar.bz2
+          test -f answers/insiders.csv
+
+      - name: Stream r4.2 and extract only what Sentry reads (skips 14 GB http.csv)
+        run: |
+          cd cert
+          set -o pipefail
+          curl -fsSL --retry 5 https://ndownloader.figshare.com/files/24856766 \
+            | tee >(sha256sum | cut -d' ' -f1 > r4.2.sha256) \
+            | lbzip2 -dc \
+            | tar x --wildcards '*logon.csv' '*device.csv' '*file.csv' '*email.csv' '*LDAP/*'
+          sleep 2
+          expected=$(grep 'r4.2.tar.bz2' CHECKSUMS-sha256.txt | grep -oiE '[0-9a-f]{64}' | head -1 | tr 'A-F' 'a-f')
+          echo "sha256 expected $expected"
+          echo "sha256 actual   $(cat r4.2.sha256)"
+          test "$expected" = "$(cat r4.2.sha256)"
+          DATA=$(dirname "$(find . -name logon.csv | head -1)")
+          echo "DATA_DIR=cert/${DATA#./}" >> "$GITHUB_ENV"
+          du -sh "$DATA"/*
+
+      - name: Evaluate
+        run: |
+          python scripts/evaluate_cert.py --data "$DATA_DIR" --answers cert/answers \
+            --window ${{ inputs.window }} --train ${{ inputs.train }} --out results/cert \
+            | tee results-cert.log
+
+      - name: Summary
+        if: always()
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, pathlib
+          p = pathlib.Path("results/cert/cert_results.json")
+          if not p.exists():
+              print("No results produced."); raise SystemExit
+          r = json.loads(p.read_text())
+          print("## CERT r4.2 results\n")
+          print("| | with HR departure context | logs only |")
+          print("|---|---|---|")
+          keys = ["insiders_evaluable", "insiders_detected", "recall", "cases_per_window",
+                  "case_precision", "innocent_users_flagged", "median_days_to_detection"]
+          for k in keys:
+              print(f"| {k} | {r['with_hr_context'][k]} | {r['logs_only'][k]} |")
+          print("\nPer scenario (with HR context):", r["with_hr_context"]["per_scenario"])
+          print("\nPer scenario (logs only):", r["logs_only"]["per_scenario"])
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cert-results
+          path: |
+            results/cert/
+            results-cert.log

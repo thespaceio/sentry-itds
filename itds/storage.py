@@ -65,7 +65,10 @@ CREATE TABLE IF NOT EXISTS detections (
     confidence    REAL NOT NULL,
     explanation   TEXT,
     evidence      TEXT,
-    created_at    TEXT NOT NULL
+    created_at    TEXT NOT NULL,
+    title         TEXT,
+    tags          TEXT,
+    attack        TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_detections_actor_day ON detections(actor_id, day);
 
@@ -80,9 +83,98 @@ CREATE TABLE IF NOT EXISTS cases (
     closed_at     TEXT,
     disposition   TEXT,
     summary       TEXT,
-    detection_ids TEXT
+    detection_ids TEXT,
+    context       TEXT,
+    engines       TEXT,
+    attack        TEXT,
+    top_detections TEXT,
+    breakdown     TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_cases_status ON cases(status);
+
+CREATE TABLE IF NOT EXISTS feedback (
+    feedback_id   TEXT PRIMARY KEY,
+    case_id       TEXT NOT NULL,
+    actor_id      TEXT NOT NULL,
+    disposition   TEXT NOT NULL,
+    analyst       TEXT NOT NULL,
+    note          TEXT,
+    detection_names TEXT,
+    at            TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_case ON feedback(case_id);
+
+CREATE TABLE IF NOT EXISTS suppressions (
+    suppression_id TEXT PRIMARY KEY,
+    actor_id       TEXT NOT NULL,
+    detection_name TEXT NOT NULL,
+    reason         TEXT NOT NULL,
+    created_by     TEXT NOT NULL,
+    created_at     TEXT NOT NULL,
+    expires_at     TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS case_notes (
+    note_id   TEXT PRIMARY KEY,
+    case_id   TEXT NOT NULL,
+    author    TEXT NOT NULL,
+    body      TEXT NOT NULL,
+    at        TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS reveal_requests (
+    request_id   TEXT PRIMARY KEY,
+    pseudonym    TEXT NOT NULL,
+    case_id      TEXT,
+    requested_by TEXT NOT NULL,
+    reason       TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'pending',
+    decided_by   TEXT,
+    decided_at   TEXT,
+    created_at   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    username      TEXT PRIMARY KEY,
+    role          TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    disabled      INTEGER NOT NULL DEFAULT 0,
+    failed_logins INTEGER NOT NULL DEFAULT 0,
+    locked_until  TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    username   TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    seq       INTEGER PRIMARY KEY AUTOINCREMENT,
+    at        TEXT NOT NULL,
+    actor     TEXT NOT NULL,
+    action    TEXT NOT NULL,
+    target    TEXT,
+    details   TEXT,
+    prev_hash TEXT NOT NULL,
+    hash      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS entity_days (
+    actor_id TEXT NOT NULL,
+    day      TEXT NOT NULL,
+    features TEXT NOT NULL,
+    scored   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (actor_id, day)
+);
+
+CREATE TABLE IF NOT EXISTS runs (
+    run_id     TEXT PRIMARY KEY,
+    at         TEXT NOT NULL,
+    stats      TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS reveals (
     reveal_id    TEXT PRIMARY KEY,
@@ -111,6 +203,7 @@ class Store:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            _migrate(conn)
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -249,8 +342,11 @@ class Store:
                 d.base_weight,
                 d.confidence,
                 d.explanation,
-                json.dumps(d.evidence),
+                json.dumps(d.evidence, default=str),
                 datetime.now(UTC).isoformat(),
+                getattr(d, "title", None),
+                json.dumps(list(getattr(d, "tags", []))),
+                json.dumps(list(getattr(d, "attack", []))),
             )
             for d in detections
         ]
@@ -258,34 +354,57 @@ class Store:
             return 0
         with self.connect() as conn:
             conn.executemany(
-                "INSERT OR REPLACE INTO detections VALUES (?,?,?,?,?,?,?,?,?,?,?)", rows
+                "INSERT OR REPLACE INTO detections (detection_id, actor_id, day, engine, "
+                "name, severity, base_weight, confidence, explanation, evidence, "
+                "created_at, title, tags, attack) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                rows,
             )
         return len(rows)
 
-    def upsert_cases(self, cases: Iterable) -> int:
-        rows = [
-            (
-                c.case_id,
-                c.actor_id,
-                c.pseudonym,
-                c.risk_score,
-                c.status,
-                c.opened_at.isoformat(),
-                c.updated_at.isoformat(),
-                c.closed_at.isoformat() if c.closed_at else None,
-                c.disposition,
-                c.summary,
-                json.dumps(c.detection_ids),
-            )
-            for c in cases
-        ]
-        if not rows:
-            return 0
+    def upsert_cases(self, cases: Iterable) -> list[str]:
+        """Insert new cases and refresh existing ones.
+
+        Re-running the pipeline updates scores and evidence but never touches
+        status, disposition or closure: an analyst's decision outlives the
+        next batch run. Returns the ids of cases that are new.
+        """
+        new_ids: list[str] = []
         with self.connect() as conn:
-            conn.executemany(
-                "INSERT OR REPLACE INTO cases VALUES (?,?,?,?,?,?,?,?,?,?,?)", rows
-            )
-        return len(rows)
+            for c in cases:
+                payload = (
+                    c.actor_id,
+                    c.pseudonym,
+                    c.risk_score,
+                    c.updated_at.isoformat(),
+                    c.summary,
+                    json.dumps(c.detection_ids),
+                    json.dumps(list(getattr(c, "context", []))),
+                    json.dumps(list(getattr(c, "engines", []))),
+                    json.dumps(list(getattr(c, "attack", []))),
+                    json.dumps([d.to_dict() for d in getattr(c, "top_detections", [])]),
+                    json.dumps(getattr(c, "breakdown", {}), default=str),
+                )
+                exists = conn.execute(
+                    "SELECT 1 FROM cases WHERE case_id = ?", (c.case_id,)
+                ).fetchone()
+                if exists:
+                    conn.execute(
+                        "UPDATE cases SET actor_id=?, pseudonym=?, risk_score=?, updated_at=?, "
+                        "summary=?, detection_ids=?, context=?, engines=?, attack=?, "
+                        "top_detections=?, breakdown=? WHERE case_id=?",
+                        (*payload, c.case_id),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO cases (case_id, actor_id, pseudonym, risk_score, "
+                        "updated_at, summary, detection_ids, context, engines, attack, "
+                        "top_detections, breakdown, status, opened_at, closed_at, disposition) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (c.case_id, *payload, c.status, c.opened_at.isoformat(),
+                         c.closed_at.isoformat() if c.closed_at else None, c.disposition),
+                    )
+                    new_ids.append(c.case_id)
+        return new_ids
 
     def open_cases(self, limit: int = 50) -> list[dict]:
         with self.connect() as conn:
@@ -294,7 +413,32 @@ class Store:
                 "ORDER BY risk_score DESC LIMIT ?",
                 (limit,),
             ).fetchall()
-        return [dict(r) for r in rows]
+        return [_case_row(r) for r in rows]
+
+    def list_cases(self, status: str | None = None, limit: int = 200) -> list[dict]:
+        sql, params = "SELECT * FROM cases", []
+        if status:
+            sql += " WHERE status = ?"
+            params.append(status)
+        sql += " ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END, risk_score DESC LIMIT ?"
+        params.append(limit)
+        with self.connect() as conn:
+            return [_case_row(r) for r in conn.execute(sql, params).fetchall()]
+
+    def get_case(self, case_id: str) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM cases WHERE case_id = ?", (case_id,)).fetchone()
+        return _case_row(row) if row else None
+
+    def set_case_status(self, case_id: str, status: str, disposition: str | None = None) -> bool:
+        closed_at = datetime.now(UTC).isoformat() if status == "closed" else None
+        with self.connect() as conn:
+            cur = conn.execute(
+                "UPDATE cases SET status = ?, disposition = COALESCE(?, disposition), "
+                "closed_at = ? WHERE case_id = ?",
+                (status, disposition, closed_at, case_id),
+            )
+            return cur.rowcount == 1
 
     def detections_for(self, actor_id: str) -> list[dict]:
         with self.connect() as conn:
@@ -306,6 +450,8 @@ class Store:
         for r in rows:
             d = dict(r)
             d["evidence"] = json.loads(d["evidence"]) if d["evidence"] else {}
+            d["tags"] = json.loads(d["tags"]) if d.get("tags") else []
+            d["attack"] = json.loads(d["attack"]) if d.get("attack") else []
             out.append(d)
         return out
 
@@ -325,6 +471,49 @@ class Store:
                 ),
             )
 
+    # -- entity timelines and run history ------------------------------
+
+    def save_entity_days(self, actor_id: str, days: list[tuple[str, dict, bool]]) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM entity_days WHERE actor_id = ?", (actor_id,))
+            conn.executemany(
+                "INSERT INTO entity_days VALUES (?,?,?,?)",
+                [(actor_id, day, json.dumps(f), int(scored)) for day, f, scored in days],
+            )
+
+    def entity_days(self, actor_id: str) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT day, features, scored FROM entity_days WHERE actor_id = ? ORDER BY day",
+                (actor_id,),
+            ).fetchall()
+        return [{"day": r["day"], "features": json.loads(r["features"]),
+                 "scored": bool(r["scored"])} for r in rows]
+
+    def record_run(self, run_id: str, stats: dict) -> None:
+        with self.connect() as conn:
+            conn.execute("INSERT OR REPLACE INTO runs VALUES (?,?,?)",
+                         (run_id, datetime.now(UTC).isoformat(), json.dumps(stats, default=str)))
+
+    def last_run(self) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM runs ORDER BY at DESC LIMIT 1").fetchone()
+        if row is None:
+            return None
+        return {"run_id": row["run_id"], "at": row["at"], **json.loads(row["stats"])}
+
+    def reveals_for_pseudonym(self, pseudonym: str) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM reveals WHERE pseudonym = ? ORDER BY at DESC",
+                                (pseudonym,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def actor_for_pseudonym(self, pseudonym: str) -> str | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT actor_id FROM cases WHERE pseudonym = ? LIMIT 1",
+                               (pseudonym,)).fetchone()
+        return row["actor_id"] if row else None
+
     # -- retention ------------------------------------------------------
 
     def purge_events_before(self, cutoff: datetime) -> int:
@@ -341,6 +530,30 @@ class Store:
                 (cutoff.isoformat(),),
             )
             return cur.rowcount
+
+
+_CASE_JSON = ("detection_ids", "context", "engines", "attack", "top_detections", "breakdown")
+
+
+def _case_row(row) -> dict:
+    d = dict(row)
+    for key in _CASE_JSON:
+        raw = d.get(key)
+        d[key] = json.loads(raw) if raw else ([] if key != "breakdown" else {})
+    return d
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after 0.1.0 to an existing database."""
+    wanted = {
+        "cases": ["context", "engines", "attack", "top_detections", "breakdown"],
+        "detections": ["title", "tags", "attack"],
+    }
+    for table, columns in wanted.items():
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for col in columns:
+            if col not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
 
 
 def _parse(value: str | None) -> datetime | None:

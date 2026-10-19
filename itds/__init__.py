@@ -5,7 +5,7 @@ alert per event, with explainability and privacy controls built in rather than
 bolted on.
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 
 from .config import DEFAULT_CONFIG, Config
 from .pipeline import Pipeline

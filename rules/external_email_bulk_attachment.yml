@@ -12,3 +12,4 @@ aggregate:
     - external_email_count > 30
     - external_email_bytes > 200000000
 tags: [exfiltration, email]
+attack: [T1048]

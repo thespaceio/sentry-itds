@@ -10,3 +10,4 @@ match:
   action: canary_access
 threshold: 1
 tags: [deception, tripwire]
+attack: [T1083, T1005]

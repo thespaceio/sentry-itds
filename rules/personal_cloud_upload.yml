@@ -16,3 +16,4 @@ match:
     - "*pcloud.com"
 threshold: 1
 tags: [exfiltration, cloud, shadow-it]
+attack: [T1567.002]

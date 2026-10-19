@@ -13,5 +13,6 @@ aggregate:
     - distinct_countries >= 2
     - logon_count >= 2
 tags: [compromised-account, authentication]
+attack: [T1078]
 references:
   - https://attack.mitre.org/techniques/T1078/

@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sentry-itds"
-version = "0.1.0"
-description = "Insider threat detection with entity risk scoring, explainable alerts and privacy controls"
+version = "1.0.0"
+description = "Insider threat detection with entity risk scoring, explainable cases, an analyst dashboard and privacy controls"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Faith Alabi" }]
-keywords = ["security", "insider-threat", "ueba", "anomaly-detection", "blue-team"]
+keywords = ["security", "insider-threat", "ueba", "anomaly-detection", "blue-team", "mitre-attack", "soc"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Information Technology",
@@ -26,7 +26,7 @@ dependencies = [
 
 [project.optional-dependencies]
 api = ["fastapi>=0.110", "uvicorn[standard]>=0.27", "pydantic>=2.6"]
-dev = ["pytest>=8.0", "pytest-cov>=4.1", "ruff>=0.3"]
+dev = ["pytest>=8.0", "pytest-cov>=4.1", "ruff>=0.3", "httpx>=0.27"]
 
 [project.scripts]
 itds = "itds.cli:main"
@@ -35,7 +35,7 @@ itds = "itds.cli:main"
 include = ["itds*"]
 
 [tool.setuptools.package-data]
-itds = ["dashboard/*.html"]
+itds = ["dashboard/*.html", "dashboard/*.js", "dashboard/*.css", "dashboard/*.svg", "dashboard/fonts/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

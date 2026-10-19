@@ -11,3 +11,4 @@ aggregate:
     - night_event_count > 100
     - restricted_file_count > 20
 tags: [off-hours, sensitive-data]
+attack: [T1213, T1039]

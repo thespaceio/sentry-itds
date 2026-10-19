@@ -14,5 +14,6 @@ aggregate:
   require_context:
     - departing
 tags: [exfiltration, departure, high-yield]
+attack: [T1039, T1213, T1074]
 references:
   - https://attack.mitre.org/techniques/T1530/

@@ -155,6 +155,8 @@ class CollectionPolicy:
         default_factory=lambda: frozenset(
             {
                 "file_content",
+                "content",
+                "body",
                 "message_body",
                 "email_body",
                 "keystrokes",
