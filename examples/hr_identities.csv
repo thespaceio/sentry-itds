@@ -1,0 +1,5 @@
+actor_id,display_name,department,role,is_privileged,joined_on,departure_notice_on,last_day_on,aliases
+u101,Adaeze Okafor,finance,Accountant,false,2021-03-01,,,adaeze.okafor;adaeze.okafor@corp.example;CORP\aokafor
+u102,Tunde Adeyemi,operations,Ops coordinator,false,2019-06-10,2026-08-25,2026-09-25,tunde.adeyemi;tunde.adeyemi@corp.example
+u103,Kelechi Eze,it,Systems administrator,true,2018-01-15,,,kelechi.eze;kelechi.eze@corp.example
+u104,Ngozi Bello,engineering,Software engineer,false,2022-02-01,,,ngozi;ngozi.bello@corp.example;uid1001

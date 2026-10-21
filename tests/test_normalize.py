@@ -24,6 +24,8 @@ def test_sensitivity_from_path():
     assert classify_sensitivity("/finance/ledgers/q1.xlsx") is Sensitivity.CONFIDENTIAL
     assert classify_sensitivity("/public/logo.png") is Sensitivity.PUBLIC
     assert classify_sensitivity(None) is Sensitivity.INTERNAL
+    assert classify_sensitivity("R:\\HR\\benefits\\plan.doc") is Sensitivity.RESTRICTED
+    assert classify_sensitivity("\\\\FS-01\\Finance\\q3.xlsx") is Sensitivity.CONFIDENTIAL
 
 
 def test_personal_cloud_detection():

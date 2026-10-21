@@ -1,0 +1,14 @@
+id: mail_forwarding_external
+title: Mailbox rule forwarding mail to an external address
+severity: high
+confidence: 0.85
+description: >
+  An inbox rule that forwards or redirects mail outside the organization
+  (Microsoft 365 New-InboxRule or Set-InboxRule). A quiet, persistent way to
+  copy everything a person receives, used both by departing employees and by
+  attackers who have taken over a mailbox.
+match:
+  action: mail_forward_rule_external
+threshold: 1
+tags: [exfiltration, email, persistence]
+attack: [T1114.003]

@@ -12,5 +12,6 @@ aggregate:
     - removable_media_count >= 1
     - total_bytes > 1000000000
 tags: [exfiltration, removable-media]
+attack: [T1052.001]
 references:
   - https://attack.mitre.org/techniques/T1052/001/

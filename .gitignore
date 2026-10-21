@@ -1,0 +1,24 @@
+# Generated data and databases (never commit monitoring data)
+data/*
+!data/.gitkeep
+*.db
+*.db-journal
+results/
+site/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Secrets
+.env
+*.key

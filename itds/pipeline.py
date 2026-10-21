@@ -24,6 +24,7 @@ from .detect.base import Detection
 from .detect.ml import AnomalyDetector
 from .detect.rules import RuleEngine, load_rules
 from .detect.statistical import StatisticalDetector
+from .feedback import FeedbackStore
 from .privacy import Pseudonymizer
 from .schema import Event, Identity
 from .scoring.risk import RiskScorer, evaluate_queue
@@ -71,6 +72,13 @@ class Pipeline:
 
         identities = identities or {}
         last_ts = events[-1].timestamp
+
+        # Analyst feedback: active suppressions and learned detection weights.
+        suppressions: set[tuple[str, str]] = set()
+        if self.store is not None:
+            feedback = FeedbackStore(self.store)
+            suppressions = feedback.suppression_set()
+            self.scorer.learned_weights = feedback.learned_weights()
         score_from = score_from or (last_ts - timedelta(days=14))
         train_until = train_until or score_from
 
@@ -98,6 +106,10 @@ class Pipeline:
         detections_by_actor: dict[str, list[Detection]] = defaultdict(list)
         skipped_insufficient: set[str] = set()
 
+        # Score every person-day with the model in one batch.
+        keys = list(features)
+        ml_scores = dict(zip(keys, self.ml.score_batch([features[k] for k in keys]), strict=True))
+
         for (actor_id, day), feats in sorted(features.items(), key=lambda kv: kv[0][1]):
             day_events = events_by_day[(actor_id, day)]
             identity = identities.get(actor_id)
@@ -118,8 +130,16 @@ class Pipeline:
                 self.statistical.evaluate(feats, profile, baseline_kind=baseline_kind)
             )
             detections_by_actor[actor_id].extend(
-                self.ml.evaluate(feats, baseline_kind=baseline_kind)
+                self.ml.evaluate(feats, baseline_kind=baseline_kind,
+                                 score=ml_scores[(actor_id, day)])
             )
+
+        suppressed = 0
+        if suppressions:
+            for actor_id, dets in detections_by_actor.items():
+                kept = [d for d in dets if (actor_id, d.name) not in suppressions]
+                suppressed += len(dets) - len(kept)
+                detections_by_actor[actor_id] = kept
 
         cases = self.scorer.build_cases(
             dict(detections_by_actor),
@@ -128,10 +148,22 @@ class Pipeline:
             pseudonymizer=self.pseudonymizer,
         )
 
+        new_case_ids: list[str] = []
         if self.store is not None:
             all_detections = [d for ds in detections_by_actor.values() for d in ds]
             self.store.insert_detections(all_detections)
-            self.store.upsert_cases(cases)
+            new_case_ids = self.store.upsert_cases(cases)
+            # Daily timelines for every entity with a case, for the dashboard.
+            case_actors = {c.actor_id for c in cases}
+            if case_actors:
+                all_feats = extract_daily_features(
+                    [e for e in events if e.actor_id in case_actors])
+                per_actor: dict[str, list] = defaultdict(list)
+                for (actor_id, day), f in sorted(all_feats.items(), key=lambda kv: kv[0][1]):
+                    per_actor[actor_id].append(
+                        (day.isoformat(), f.values, day >= score_from.date()))
+                for actor_id, days in per_actor.items():
+                    self.store.save_entity_days(actor_id, days)
 
         total_detections = sum(len(v) for v in detections_by_actor.values())
         return {
@@ -146,6 +178,9 @@ class Pipeline:
             "events_scored": len(scoring_events),
             "events_trained": len(events) - len(scoring_events),
             "scored_from": score_from.isoformat(),
+            "suppressed_detections": suppressed,
+            "new_case_ids": new_case_ids,
+            "learned_weights": dict(self.scorer.learned_weights),
         }
 
     # -- evaluation -----------------------------------------------------
@@ -169,4 +204,7 @@ def _empty_result() -> dict:
         "events_scored": 0,
         "events_trained": 0,
         "scored_from": None,
+        "suppressed_detections": 0,
+        "new_case_ids": [],
+        "learned_weights": {},
     }

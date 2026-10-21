@@ -1,0 +1,7 @@
+type=USER_LOGIN msg=audit(1788249600.123:101): pid=812 uid=0 auid=1001 ses=4 msg='op=login acct="ngozi" exe="/usr/sbin/sshd" hostname=? addr=10.0.4.21 terminal=ssh res=success'
+type=USER_LOGIN msg=audit(1788249700.456:102): pid=813 uid=0 auid=4294967295 ses=4294967295 msg='op=login acct="ngozi" exe="/usr/sbin/sshd" hostname=? addr=185.220.101.7 terminal=ssh res=failed'
+type=USER_CMD msg=audit(1788250000.789:103): pid=900 uid=1001 auid=1001 ses=4 msg='cwd="/home/ngozi" cmd=636174202F6574632F736861646F77 exe="/usr/bin/sudo" terminal=pts/0 res=success'
+type=SYSCALL msg=audit(1788250100.000:104): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c items=1 ppid=1 pid=950 auid=1001 uid=1001 comm="cat" exe="/usr/bin/cat" key="sentry_sensitive"
+type=PATH msg=audit(1788250100.000:104): item=0 name="/srv/hr/personnel/contracts.csv" inode=1234 nametype=NORMAL
+type=SYSCALL msg=audit(1788250200.000:105): arch=c000003e syscall=257 success=yes exit=3 auid=4294967295 uid=0 comm="cron" exe="/usr/sbin/cron" key="sentry_sensitive"
+type=PATH msg=audit(1788250200.000:105): item=0 name="/etc/crontab" nametype=NORMAL

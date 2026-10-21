@@ -1,0 +1,7 @@
+CreationDate,UserIds,Operations,AuditData
+2026-09-01T08:01:00,adaeze.okafor@corp.example,UserLoggedIn,"{""ClientIP"": ""102.89.1.10""}"
+2026-09-01T09:15:00,adaeze.okafor@corp.example,FileDownloaded,"{""ObjectId"": ""https://corp.sharepoint.com/sites/Finance/Shared Documents/budget_2027.xlsx"", ""SourceFileName"": ""budget_2027.xlsx""}"
+2026-09-01T09:20:00,adaeze.okafor@corp.example,AnonymousLinkCreated,"{""ObjectId"": ""https://corp.sharepoint.com/sites/Finance/Shared Documents/budget_2027.xlsx""}"
+2026-09-01T21:30:00,adaeze.okafor@corp.example,New-InboxRule,"{""Parameters"": [{""Name"": ""Name"", ""Value"": ""sync""}, {""Name"": ""ForwardTo"", ""Value"": ""adaeze.personal@gmail.com""}]}"
+2026-09-01T21:31:00,adaeze.okafor@corp.example,New-InboxRule,"{""Parameters"": [{""Name"": ""Name"", ""Value"": ""team""}, {""Name"": ""ForwardTo"", ""Value"": ""ops@corp.example""}]}"
+2026-09-01T10:00:00,adaeze.okafor@corp.example,MailItemsAccessed,{}

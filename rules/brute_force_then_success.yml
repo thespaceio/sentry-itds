@@ -1,0 +1,15 @@
+id: brute_force_then_success
+title: Repeated failed logons followed by a success
+severity: high
+confidence: 0.8
+description: >
+  Ten or more failed logons and at least one success on the same day. One
+  forgotten password produces two or three failures, not ten; ten followed by
+  a success is what a guessed or sprayed credential looks like.
+aggregate:
+  window: day
+  condition:
+    - failed_logon_count >= 10
+    - logon_count >= 1
+tags: [compromised-account, authentication]
+attack: [T1110, T1078]

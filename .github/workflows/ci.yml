@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Lint
+        run: ruff check itds tests scripts
+      - name: Test
+        run: python -m pytest tests -q
+      - name: Demo runs end to end
+        run: |
+          python -m itds generate --users 40 --days 45
+          python -m itds run --no-alerts --limit 3
+          python -m itds audit verify
+      - name: Dashboard demo builds
+        run: python scripts/build_demo.py --out site --users 40 --days 45
